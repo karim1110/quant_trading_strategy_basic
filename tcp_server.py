@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 import socket
 import threading
 import csv
@@ -9,108 +8,113 @@ import sys
 import time
 import datetime
 
+def handle_csv_client(client, files, interval):
+    """
+    Streams CSV data to the connected client.
+    Each row is sent as a JSON message with a timestamp.
+    """
+    csv_data = []
+    # Read all CSV files and accumulate rows
+    for f in files:
+        try:
+            with open(f, 'r') as csvfile:
+                reader = csv.DictReader(csvfile)
+                for row in reader:
+                    csv_data.append(row)
+        except Exception as e:
+            print(f"Error reading file {f}: {e}")
+    # Stream each row to the client
+    for row in csv_data:
+        # Optionally add a timestamp or other processing here
+        row['date'] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            client.send((json.dumps(row) + "\n").encode("utf-8"))
+            time.sleep(interval)
+        except Exception as e:
+            print(f"Error sending to CSV client: {e}")
+            break
+    client.close()
 
+def csv_stream_server(host, port, files, interval):
+    """
+    Listens for incoming CSV stream clients.
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind((host, port))
+    s.listen(5)
+    print(f"CSV Stream Server listening on {host}:{port}")
+    while True:
+        client, addr = s.accept()
+        print(f"CSV Client connected from {addr}")
+        threading.Thread(target=handle_csv_client, args=(client, files, interval)).start()
 
-class ThreadedServer(object):
-    def __init__(self, host,opt):
-        self.environment = {}
-        self.environment['NoMode'] = {'points' : 0}
-        self.environment['Occupancy'] = {'occupancy' : 0, 'points' : 0}
-        self.host = host
-        self.port = opt.port
-        self.opt = opt
-        self.state = self.environment[opt.mode if opt.mode else 'NoMode']
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.sock.bind((self.host, self.port))
-        self.lock = threading.Lock()
+def handle_order_client(client):
+    """
+    Receives order messages from a client.
+    Expects newline-delimited JSON messages.
+    """
+    buffer = ""
+    while True:
+        try:
+            data = client.recv(1024).decode("utf-8")
+            if not data:
+                break
+            buffer += data
+            while "\n" in buffer:
+                line, buffer = buffer.split("\n", 1)
+                if not line.strip():
+                    continue
+                try:
+                    order = json.loads(line.strip())
+                    print("Received order:", order)
+                    # Here you could add further processing for the order.
+                except json.JSONDecodeError:
+                    print("Received invalid JSON order:", line)
+        except Exception as e:
+            print(f"Error receiving order: {e}")
+            break
+    client.close()
 
-    def listen(self):
-        self.sock.listen(5)
-        while True:
-            client, address = self.sock.accept()
-            client.settimeout(500)
-            threading.Thread(target = self.listenToClient,args = (client,address)).start()
-            threading.Thread(target = self.sendStreamToClient,args =
-                             (client,self.sendCSVfile())).start()
-
-    def handle_client_answer(self,obj):
-        if self.opt.mode is not None and self.opt.mode=='Occupancy':
-            
-            if 'Occupancy' not in obj:
-                return
-            self.lock.acquire()
-            if self.state['occupancy'] == int(obj['Occupancy']):
-                self.state['points']+=1 
-            self.lock.release()
-        return 
-
-    def listenToClient(self, client, address):
-        size = 1024
-        while True:
-            try:
-                data = client.recv(size).decode()
-                if data:
-                    # Set the response to echo back the recieved data
-                    a=json.loads(data.rstrip('\n\r '))
-                    self.handle_client_answer(a)
-    
-                    #client.send(response)
-                else:
-                    print('Client disconnected')
-                    return False
-            except:
-                print('Client closed the connection')
-                print ("Unexpected error:", sys.exc_info()[0])
-                client.close()
-                return False
-
-    def handleCustomData(self,buffer):
-        if self.opt.mode is not None and self.opt.mode=='Occupancy':
-            self.lock.acquire()
-            buffer['date']=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            self.state['occupancy']= int(buffer['Occupancy'])
-            buffer['Occupancy']=-1
-            self.lock.release()
-
-    def sendStreamToClient(self,client,buffer):
-        for i in buffer:
-            print(i)
-            self.handleCustomData(i)
-            try:
-                client.send((self.convertStringToJSON(i)+'\n').encode('utf-8'))
-                time.sleep(self.opt.interval)
-            except:
-                print('End of stream')
-                return False
-        client.send((self.convertStringToJSON(self.state)+'\n').encode('utf-8'))   
-        return False
-
-    def convertStringToJSON(self,st):
-        return json.dumps(st)
-            
-    def sendCSVfile(self):
-        out=[]
-        for f in self.opt.files:
-            print ('reading file %s...' % f)
-            csvfile = open(f, 'r')
-            reader = csv.DictReader( csvfile)
-            for row in reader:
-                out+=[row]
-        return out
+def order_server(host, port):
+    """
+    Listens for incoming order connections.
+    """
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    s.bind((host, port))
+    s.listen(5)
+    print(f"Order Server listening on {host}:{port}")
+    while True:
+        client, addr = s.accept()
+        print(f"Order Client connected from {addr}")
+        threading.Thread(target=handle_order_client, args=(client,)).start()
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(usage='usage: tcp_server -p port [-f -m]')
-    parser.add_argument('-f', '--files', nargs='+')
-    parser.add_argument("-m", "--mode",action="store", dest="mode")
-    parser.add_argument("-p", "--port",action="store", dest="port",type=int)
-    parser.add_argument("-t", "--time-interval",action="store",
-                        dest="interval",type=int,default=1)
-    
-    opt=parser.parse_args()
-    if not opt.port:
-        parser.error('Port not given')
-    ThreadedServer('127.0.0.1',opt).listen()
+    parser = argparse.ArgumentParser(usage='Usage: unified_server.py --csv-port PORT --order-port PORT --files file1.csv file2.csv [--interval seconds]')
+    parser.add_argument("--csv-port", type=int, default=8080, help="Port for CSV streaming")
+    parser.add_argument("--order-port", type=int, default=9999, help="Port for receiving orders")
+    parser.add_argument("--files", nargs='+', required=True, help="CSV file(s) to stream")
+    parser.add_argument("--host", default="127.0.0.1", help="Host address")
+    parser.add_argument("--interval", type=int, default=1, help="Time interval between messages")
+    args = parser.parse_args()
 
+    # Start CSV stream server in one thread.
+    csv_thread = threading.Thread(target=csv_stream_server, args=(args.host, args.csv_port, args.files, args.interval))
+    csv_thread.daemon = True
+    csv_thread.start()
 
-# python3 -u tcp_server.py -p 8080 -f finance/finance.csv
+    # Start Order server in another thread.
+    order_thread = threading.Thread(target=order_server, args=(args.host, args.order_port))
+    order_thread.daemon = True
+    order_thread.start()
+
+    print("Unified server running. Press Ctrl+C to exit.")
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("Server shutting down.")
+        sys.exit(0)
+
+# python3 tcp_server.py --csv-port 8080 --order-port 9999 --files finance/finance.csv
