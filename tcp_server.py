@@ -92,7 +92,7 @@ def order_server(host, port):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(usage='Usage: unified_server.py --csv-port PORT --order-port PORT --files file1.csv file2.csv [--interval seconds]')
-    parser.add_argument("--csv-port", type=int, default=8080, help="Port for CSV streaming")
+    parser.add_argument("--csv-port", type=int, default=9995, help="Port for CSV streaming")
     parser.add_argument("--order-port", type=int, default=9999, help="Port for receiving orders")
     parser.add_argument("--files", nargs='+', required=True, help="CSV file(s) to stream")
     parser.add_argument("--host", default="127.0.0.1", help="Host address")
@@ -117,4 +117,4 @@ if __name__ == "__main__":
         print("Server shutting down.")
         sys.exit(0)
 
-# python3 tcp_server.py --csv-port 8080 --order-port 9999 --files finance/finance.csv
+# python3 tcp_server.py --csv-port 9995 --order-port 9999 --files finance/finance.csv

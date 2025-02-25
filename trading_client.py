@@ -15,9 +15,20 @@ class FinanceClient:
         self.initial_capital = initial_capital
         self.available_capital = initial_capital
         self.portfolio = defaultdict(int)  # Track owned shares
-        # Paramètres pour se connecter au serveur d'ordres
+        
         self.order_host = order_host
         self.order_port = order_port
+        self.order_socket = None  # Will hold our persistent connection
+        self.connect_order_socket()
+
+    def connect_order_socket(self):
+        try:
+            self.order_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.order_socket.connect((self.order_host, self.order_port))
+            print(f"Connected to order server at {self.order_host}:{self.order_port}")
+        except Exception as e:
+            print("Error connecting to order server:", e)
+            self.order_socket = None
 
     def calculate_moving_average(self, data_list):
         if len(data_list) >= self.window_size:
@@ -94,15 +105,19 @@ class FinanceClient:
         return "NORMAL"
 
     def send_order(self, order_msg):
-        """Envoie un message d'ordre au serveur d'ordres."""
+        """Send an order message using a persistent socket connection."""
+        if self.order_socket is None:
+            self.connect_order_socket()
         try:
-            s_order = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s_order.connect((self.order_host, self.order_port))
-            s_order.send((json.dumps(order_msg) + "\n").encode("utf-8"))
-            s_order.close()
+            self.order_socket.send((json.dumps(order_msg) + "\n").encode("utf-8"))
             print("Order sent:", order_msg)
         except Exception as e:
-            print("Error sending order:", e)
+            print("Error sending order, attempting to reconnect:", e)
+            self.order_socket.close()
+            self.order_socket = None
+            self.connect_order_socket()
+            # Optionally, try sending again here
+
 
     def run(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -223,5 +238,5 @@ class FinanceClient:
 
 
 if __name__ == "__main__":
-    client = FinanceClient("127.0.0.1", 8080, window_size=5, initial_capital=1000000)
+    client = FinanceClient("127.0.0.1", 9995, window_size=5, initial_capital=1000000)
     client.run()
