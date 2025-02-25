@@ -96,7 +96,7 @@ if __name__ == "__main__":
     parser.add_argument("--order-port", type=int, default=9999, help="Port for receiving orders")
     parser.add_argument("--files", nargs='+', required=True, help="CSV file(s) to stream")
     parser.add_argument("--host", default="127.0.0.1", help="Host address")
-    parser.add_argument("--interval", type=int, default=1, help="Time interval between messages")
+    parser.add_argument("--interval", type=int, default=0.1, help="Time interval between messages")
     args = parser.parse_args()
 
     # Start CSV stream server in one thread.

@@ -16,6 +16,10 @@ class FinanceClient:
         self.available_capital = initial_capital
         self.portfolio = defaultdict(int)  # Track owned shares
         
+        # New: Separate volume histories for Buy and Sell orders
+        self.buy_volume_history = defaultdict(list)
+        self.sell_volume_history = defaultdict(list)
+        
         self.order_host = order_host
         self.order_port = order_port
         self.order_socket = None  # Will hold our persistent connection
@@ -35,13 +39,13 @@ class FinanceClient:
             ma = sum(data_list[-self.window_size:]) / self.window_size
             return round(ma, 2)
         return None
-
-    def analyze_sentiment(self, symbol, price, price_ma, volume_signal):
+    
+    def analyze_sentiment(self, symbol, price, price_ma, volume_signal, news, buy_volume_ma, sell_volume_ma):
         """Calculate market sentiment on a scale from -100 to 100"""
         if price_ma is None:
             return 0  # Neutral when not enough data
 
-        # Calculate price momentum (percent above/below MA)
+        # Price momentum (percent above/below MA)
         price_momentum = ((price / price_ma) - 1) * 100
 
         # Volume factor (-25 to 25)
@@ -60,11 +64,28 @@ class FinanceClient:
             elif all(recent_prices[i] > recent_prices[i + 1] for i in range(len(recent_prices) - 1)):
                 trend_factor = -25  # Consistently falling
 
-        # News factor (simplified - using News field if available)
-        news_factor = 0
+        # Map the news value (0, 50, 100) to a news factor between -25 and +25.
+        try:
+            news_value = int(news)
+        except ValueError:
+            news_value = 50  # Default to neutral if conversion fails
+        
+        # Note: the original code then sets news_factor to 0; if you want to use it, remove the next line:
+        news_value = 0 if news_value == 100 else news_value
+        news_value = 100 if news_value == 0 else news_value
 
-        # Combine factors to get overall sentiment (-100 to 100 scale)
-        sentiment = min(100, max(-100, price_momentum + volume_factor + trend_factor + news_factor))
+        news_factor = (news_value - 50) / 2
+
+        # New: Incorporate separate buy/sell volume analysis
+        if buy_volume_ma is not None and sell_volume_ma is not None and sell_volume_ma != 0:
+            ratio = buy_volume_ma / sell_volume_ma
+            # Map the ratio such that a ratio > 1 adds a positive adjustment and < 1 adds a negative one.
+            volume_ratio_factor = (ratio - 1) * 25  # Scaling factor can be adjusted as needed
+        else:
+            volume_ratio_factor = 0
+
+        # Combine factors (ensure overall sentiment is within [-100, 100])
+        sentiment = min(100, max(-100, price_momentum + volume_factor + trend_factor + news_factor + volume_ratio_factor))
         return round(sentiment, 2)
 
     def calculate_trade_quantity(self, symbol, price, sentiment, trade_signal):
@@ -86,12 +107,15 @@ class FinanceClient:
         quantity = int(max_quantity * sentiment_weight)
 
         # Ensure minimum meaningful trade size
-        min_quantity = max(1, int(10000 / price))  # At least $10,000 worth or 1 share
+        min_quantity = min(1, int(10000 / price))  # At least $10,000 worth or 1 share
         quantity = max(quantity, min_quantity)
 
         # For sell orders, can't sell more than we own
         if trade_signal == "SELL":
             quantity = min(quantity, self.portfolio[symbol])
+        
+        if trade_signal == "BUY" and self.available_capital < price * quantity:
+            quantity = max(quantity, 10000)
 
         return quantity
 
@@ -146,14 +170,25 @@ class FinanceClient:
                         symbol = message['Symbol']
                         price = float(message['Price'])
                         market_quantity = int(message['Quantity'])
-
+                        
                         # Update histories
                         self.price_history[symbol].append(price)
                         self.quantity_history[symbol].append(market_quantity)
+                        
+                        # Update separate volume histories based on order side
+                        side = message.get("Side", "B")
+                        if side == "B":
+                            self.buy_volume_history[symbol].append(market_quantity)
+                        elif side == "S":
+                            self.sell_volume_history[symbol].append(market_quantity)
 
-                        # Calculate Moving Average
+                        # Calculate Moving Average for price and overall quantity
                         price_ma = self.calculate_moving_average(self.price_history[symbol])
                         quantity_ma = self.calculate_moving_average(self.quantity_history[symbol])
+                        
+                        # Calculate Moving Averages for buy and sell volumes
+                        buy_volume_ma = self.calculate_moving_average(self.buy_volume_history[symbol])
+                        sell_volume_ma = self.calculate_moving_average(self.sell_volume_history[symbol])
 
                         # Analyze market signals
                         volume_signal = self.analyze_volume(market_quantity, quantity_ma)
@@ -166,8 +201,9 @@ class FinanceClient:
                             elif price < price_ma and volume_signal != 'HIGH':
                                 trade_signal = 'SELL'
 
-                        # Calculate sentiment
-                        sentiment = self.analyze_sentiment(symbol, price, price_ma, volume_signal)
+                        # Calculate sentiment (pass in the buy and sell volume moving averages)
+                        news = message.get('News', '50')
+                        sentiment = self.analyze_sentiment(symbol, price, price_ma, volume_signal, news, buy_volume_ma, sell_volume_ma)
 
                         # Calculate trade quantity
                         trade_quantity = self.calculate_trade_quantity(symbol, price, sentiment, trade_signal)
@@ -195,34 +231,41 @@ class FinanceClient:
                             'Portfolio': self.portfolio[symbol],
                             'Capital': round(self.available_capital, 2)
                         }
-
                         # Save to CSV
                         writer.writerow(row)
                         csvfile.flush()
 
-                        # Send order to order server si le signal n'est pas WAIT
+                        # Send order to order server if the signal is not WAIT
                         if trade_signal in ["BUY", "SELL"] and trade_quantity > 0:
                             order_msg = {
                                 "Symbol": symbol,
-                                "Exchange": "3",  # Valeur constante, à ajuster si nécessaire
+                                "Exchange": "3",  # Adjust as necessary
                                 "Quantity": str(trade_quantity),
                                 "Side": "B" if trade_signal == "BUY" else "S",
                                 "Price": str(price)
                             }
                             self.send_order(order_msg)
 
-                        # Print analysis
+                        # Calculate total portfolio value and profit/loss
+                        total_portfolio_value = self.available_capital
+                        for sym, shares in self.portfolio.items():
+                            if self.price_history[sym]:
+                                total_portfolio_value += shares * self.price_history[sym][-1]
+                        profit_loss = total_portfolio_value - self.initial_capital
+
+                        # Print analysis along with portfolio performance
                         print("\n" + "=" * 70)
                         print(f"Stock: {symbol}")
                         print(f"Current Price: ${price:,.2f}")
-                        print(
-                            f"Price MA ({self.window_size} periods): ${price_ma if price_ma is not None else 'Calculating...'}")
+                        print(f"Price MA ({self.window_size} periods): ${price_ma if price_ma is not None else 'Calculating...'}")
                         print(f"Market Volume: {market_quantity:,} shares")
                         print(f"Market Sentiment: {sentiment:+.2f}")
                         print(f"Trade Signal: {trade_signal}")
                         print(f"Trade Quantity: {trade_quantity:,} shares")
-                        print(f"Portfolio: {self.portfolio[symbol]:,} shares")
+                        print(f"Portfolio for {symbol}: {self.portfolio[symbol]:,} shares")
                         print(f"Available Capital: ${self.available_capital:,.2f}")
+                        print(f"Total Portfolio Value: ${total_portfolio_value:,.2f}")
+                        print(f"Profit/Loss: ${profit_loss:,.2f}")
                         print("=" * 70)
 
                     except json.JSONDecodeError:
