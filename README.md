@@ -18,6 +18,30 @@ python trading_client.py
 
 The trading client will connect to the server, process incoming data, and send trade orders based on the decision-making algorithm.
 
+
+## For the XGBoost Model
+
+Train the Model:
+
+Run the training script to build and save the XGBoost model:
+
+```bash
+python train_xgboost.py
+```
+
+This script will process historical data from finance.csv, train the model, and save it as xgb_model.pkl.
+
+Run the XGBoost Trading Client:
+
+Start the TCP server as described above. Then, in another terminal window, execute:
+
+```bash
+python trade_xgboost.py
+```
+
+This client loads the trained XGBoost model and uses it to make trading decisions in real time.
+
+
 # Trading Model Project
 
 The goal of this project is to build a trading model that receives order data and news from 3 different exchanges, processes the information, and then executes trades based on a decision-making algorithm. The project requires implementing a TCP client, maintaining an order book, and creating a trading strategy.
