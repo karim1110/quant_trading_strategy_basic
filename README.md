@@ -1,3 +1,23 @@
+# Running the Project
+
+To run the complete system, follow these steps:
+
+Start the TCP server that streams CSV data and receives orders. From the project root, execute:
+
+```bash
+python3 tcp_server.py --csv-port 9995 --order-port 9999 --files finance/finance.csv
+```
+
+This command starts the server using data from finance/finance.csv.
+
+In another terminal window, run your trading client (the moving average model) by executing:
+
+```bash
+python trading_client.py
+```
+
+The trading client will connect to the server, process incoming data, and send trade orders based on the decision-making algorithm.
+
 # Trading Model Project
 
 The goal of this project is to build a trading model that receives order data and news from 3 different exchanges, processes the information, and then executes trades based on a decision-making algorithm. The project requires implementing a TCP client, maintaining an order book, and creating a trading strategy.
