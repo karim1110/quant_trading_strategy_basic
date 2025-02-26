@@ -16,7 +16,7 @@ class FinanceClient:
         self.available_capital = initial_capital
         self.portfolio = defaultdict(int)  # Track owned shares
         
-        # New: Separate volume histories for Buy and Sell orders
+        # Separate volume histories for Buy and Sell orders
         self.buy_volume_history = defaultdict(list)
         self.sell_volume_history = defaultdict(list)
         
@@ -70,13 +70,12 @@ class FinanceClient:
         except ValueError:
             news_value = 50  # Default to neutral if conversion fails
         
-        # Note: the original code then sets news_factor to 0; if you want to use it, remove the next line:
         news_value = 0 if news_value == 100 else news_value
         news_value = 100 if news_value == 0 else news_value
 
         news_factor = (news_value - 50) / 2
 
-        # New: Incorporate separate buy/sell volume analysis
+        # Incorporate separate buy/sell volume analysis
         if buy_volume_ma is not None and sell_volume_ma is not None and sell_volume_ma != 0:
             ratio = buy_volume_ma / sell_volume_ma
             # Map the ratio such that a ratio > 1 adds a positive adjustment and < 1 adds a negative one.
@@ -140,7 +139,6 @@ class FinanceClient:
             self.order_socket.close()
             self.order_socket = None
             self.connect_order_socket()
-            # Optionally, try sending again here
 
 
     def run(self):
