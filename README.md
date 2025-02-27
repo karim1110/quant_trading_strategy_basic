@@ -45,4 +45,4 @@ This client loads the trained XGBoost model and uses it to make trading decision
 
 ### Moving Average Model : 2.5K$ profit
 
-### XGBoost Model : 5K$ profit
+### XGBoost Model : 17K$ profit
